@@ -13,6 +13,15 @@ var TradeStatuses = []string{
 	TradeStatusPending, TradeStatusConfirmed, TradeStatusCompleted, TradeStatusCancelled,
 }
 
+// ActiveTradeStatuses lists the not-yet-finished statuses that keep a product
+// reserved: a product may have at most one trade order in these statuses.
+var ActiveTradeStatuses = []string{TradeStatusPending, TradeStatusConfirmed}
+
+// CancellableTradeStatuses lists statuses from which either party may cancel
+// before the trade completes (pending before buyer receipt, confirmed after
+// buyer receipt but before seller payment confirmation).
+var CancellableTradeStatuses = []string{TradeStatusPending, TradeStatusConfirmed}
+
 // IsTradeStatus reports whether the given status is valid.
 func IsTradeStatus(s string) bool {
 	for _, v := range TradeStatuses {

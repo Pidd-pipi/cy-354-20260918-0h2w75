@@ -144,6 +144,24 @@ cy-354/
   - `GET/POST /api/v1/book-exchanges`、`POST /api/v1/book-exchanges/:id/close`
   - `GET /api/v1/admin/stats`（管理员）
 
+## 单件商品预约闭环（交易状态机）
+
+同一商品在任意时刻**最多存在一个未完成订单**（`pending`/`confirmed`），商品与订单状态原子联动：
+
+1. **购买预约**：`POST /trade-orders` 在单个数据库事务内 `SELECT ... FOR UPDATE` 锁定商品行，条件更新 `on_sale → reserved` 并创建唯一的 `pending` 订单。并发购买在行锁上排队，只有一个请求成功，其余返回 `409 商品已被预订`，不会留下重复订单；`trade_orders` 上的生成列唯一索引 `uq_trade_orders_active_product` 提供数据库级兜底。
+2. **取消回滚**：未完成前（`pending` 或买家已收货的 `confirmed`）买卖双方任一人可 `POST /trade-orders/:id/cancel`，订单置 `cancelled` 且商品原子回到 `on_sale`，其他买家可重新购买。取消与确认并发时按订单主键加锁 + 条件更新（CAS），只有一个结果生效，死锁自动重试。
+3. **确认收货 → 确认收款**：买家 `buyer-confirm` 后订单 `pending → confirmed`（商品保持 `reserved`）；卖家 `seller-confirm` 后订单 `completed` 且商品 `reserved → sold`。未收货先收款、重复收货/收款、完成后取消均返回 `409`，非参与方操作返回 `403`。
+4. **列表一致性**：前端下单/取消/确认后联动刷新商品列表与「我的交易」，刷新页面后状态以服务端为准。
+
+集成与并发实测见 `backend/test/integration/trade_flow_test.go`（需要 MySQL 8 / MariaDB 10.11+，默认跳过）：
+
+```bash
+TEST_MYSQL_DSN='user:pwd@tcp(127.0.0.1:3306)/campus_test?charset=utf8mb4&parseTime=True&loc=Local' \
+  go test ./test/integration/ -v -count=1
+```
+
+覆盖：10 买家并发购买唯一胜出、同一买家重复下单、买家/卖家取消回滚与重新购买、收货/收款完整流程、重复确认与完成后取消、取消与收款并发竞态、非参与方越权操作。
+
 ## API 接口清单
 
 统一前缀 `/api/v1`；鉴权列中「登录」表示需要 JWT，「管理员」表示需要管理员角色。

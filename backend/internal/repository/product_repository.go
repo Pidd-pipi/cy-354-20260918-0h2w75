@@ -6,6 +6,7 @@ import (
 	"github.com/lp/campus-market/internal/model"
 	"github.com/lp/campus-market/internal/util"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ProductRepository persists product rows.
@@ -27,6 +28,18 @@ func (r *ProductRepository) Create(ctx context.Context, p *model.Product) error 
 func (r *ProductRepository) FindByID(ctx context.Context, id uint) (*model.Product, error) {
 	var p model.Product
 	err := db(ctx, r.db).First(&p, id).Error
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return &p, nil
+}
+
+// FindByIDForUpdate returns a product while taking a row-level lock
+// (SELECT ... FOR UPDATE). It must be called inside a transaction so the lock
+// is held until commit, serializing concurrent purchase attempts.
+func (r *ProductRepository) FindByIDForUpdate(ctx context.Context, id uint) (*model.Product, error) {
+	var p model.Product
+	err := db(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&p, id).Error
 	if err != nil {
 		return nil, normalizeError(err)
 	}
@@ -68,6 +81,23 @@ func (r *ProductRepository) UpdateStatus(ctx context.Context, id uint, status st
 	}
 	if res.RowsAffected == 0 {
 		return util.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateStatusIfFrom conditionally moves a product from one of the allowed
+// current statuses to the target status. It is the compare-and-set guard of
+// the product state machine: when no row matches the expected pre-state it
+// returns util.ErrConflict so concurrent transitions cannot double-fire.
+func (r *ProductRepository) UpdateStatusIfFrom(ctx context.Context, id uint, from []string, to string) error {
+	res := db(ctx, r.db).Model(&model.Product{}).
+		Where("id = ? AND status IN ?", id, from).
+		Update("status", to)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return util.ErrConflict
 	}
 	return nil
 }

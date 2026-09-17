@@ -50,10 +50,11 @@ async function buy(p: Product) {
     return
   }
   await createTradeOrder(p.id)
-  ElMessage.success('已下单')
+  ElMessage.success('已下单，商品已预订')
+  await loadGraduation()
 }
 
-onMounted(async () => {
+async function loadGraduation() {
   loading.value = true
   try {
     const res = await listGraduation()
@@ -61,7 +62,9 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadGraduation)
 </script>
 
 <style scoped>

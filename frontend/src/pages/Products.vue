@@ -68,7 +68,8 @@ async function buy(p: Product) {
     return
   }
   await createTradeOrder(p.id)
-  ElMessage.success('已下单，等待卖家确认')
+  ElMessage.success('已下单，商品已预订，等待双方确认')
+  await load()
 }
 
 async function chat(p: Product) {

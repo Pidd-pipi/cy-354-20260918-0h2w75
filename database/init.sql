@@ -63,10 +63,15 @@ CREATE TABLE IF NOT EXISTS trade_orders (
   seller_confirmed_at DATETIME(3) NULL,
   completed_at DATETIME(3) NULL,
   created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+  -- 生成列：仅 pending/confirmed（未完成）订单占用商品槽位，取消/完成后置 NULL。
+  -- 配合唯一索引保证同一商品至多存在一个未完成订单（并发购买的数据库级兜底）。
+  active_product_id BIGINT UNSIGNED GENERATED ALWAYS AS
+    (CASE WHEN status IN ('pending', 'confirmed') THEN product_id ELSE NULL END) STORED,
   INDEX idx_trade_orders_product (product_id),
   INDEX idx_trade_orders_buyer (buyer_id),
   INDEX idx_trade_orders_seller (seller_id),
-  INDEX idx_trade_orders_status (status)
+  INDEX idx_trade_orders_status (status),
+  UNIQUE INDEX uq_trade_orders_active_product (active_product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS reviews (

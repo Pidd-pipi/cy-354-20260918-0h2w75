@@ -14,6 +14,8 @@ const (
 	MsgPhoneOrPassword     = "手机号或密码错误"
 	MsgProductNotOnSale    = "商品当前不在售"
 	MsgProductSold         = "商品已售出"
+	MsgProductReserved     = "商品已被预订，其他买家暂不可下单"
+	MsgOwnOrderConflict    = "您已对该商品下单，请勿重复购买"
 	MsgTradeStatusInvalid  = "当前交易状态不可操作"
 	MsgNotParticipant      = "仅买家和卖家可操作该订单"
 	MsgAlreadyReviewed     = "该交易已评价"

@@ -5,9 +5,23 @@ import (
 	"context"
 	"errors"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/lp/campus-market/internal/util"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// MySQL server error numbers handled by the repository layer.
+const (
+	mysqlErrDupEntry = 1062
+	mysqlErrDeadlock = 1213
+	mysqlErrLockWait = 1205
+)
+
+// clauseLockingForUpdate appends a SELECT ... FOR UPDATE row lock. All
+// transactions that lock product rows must acquire rows in the same order
+// to avoid deadlocks.
+var clauseLockingForUpdate = clause.Locking{Strength: "UPDATE"}
 
 // txKey is the context key under which an in-flight transaction lives.
 type txKey struct{}
@@ -35,13 +49,23 @@ func Transaction(ctx context.Context, database *gorm.DB, fn func(txCtx context.C
 	})
 }
 
-// normalizeError converts GORM errors into sentinel repository errors.
+// normalizeError converts GORM and MySQL driver errors into sentinel
+// repository errors that services can branch on with errors.Is.
 func normalizeError(err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return util.ErrNotFound
+	}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		switch mysqlErr.Number {
+		case mysqlErrDupEntry:
+			return util.ErrConflict
+		case mysqlErrDeadlock, mysqlErrLockWait:
+			return util.ErrConflict
+		}
 	}
 	return err
 }

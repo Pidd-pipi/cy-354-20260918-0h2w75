@@ -13,7 +13,16 @@
     </div>
     <div class="product-actions">
       <el-button size="small" @click="$emit('detail', product)">详情</el-button>
-      <el-button v-if="!hideBuy" size="small" type="primary" :disabled="product.status !== 'on_sale'" @click="$emit('buy', product)">购买</el-button>
+      <el-button
+        v-if="!hideBuy && product.status === 'on_sale'"
+        size="small"
+        type="primary"
+        :loading="buying"
+        @click="$emit('buy', product)"
+      >购买</el-button>
+      <el-button v-if="!hideBuy && product.status === 'reserved'" size="small" type="warning" disabled>已预订</el-button>
+      <el-button v-if="!hideBuy && product.status === 'sold'" size="small" disabled>已售出</el-button>
+      <el-button v-if="!hideBuy && product.status === 'removed'" size="small" disabled>已下架</el-button>
       <el-button v-if="showChat" size="small" @click="$emit('chat', product)">私信</el-button>
     </div>
   </el-card>
@@ -23,7 +32,7 @@
 import type { Product } from '../../types'
 import { categoryLabel, productStatusLabel, productStatusType } from '../../constants/product'
 
-withDefaults(defineProps<{ product: Product; hideBuy?: boolean; showChat?: boolean }>(), { hideBuy: false, showChat: false })
+withDefaults(defineProps<{ product: Product; hideBuy?: boolean; showChat?: boolean; buying?: boolean }>(), { hideBuy: false, showChat: false, buying: false })
 defineEmits<{ (e: 'detail', p: Product): void; (e: 'buy', p: Product): void; (e: 'chat', p: Product): void }>()
 </script>
 

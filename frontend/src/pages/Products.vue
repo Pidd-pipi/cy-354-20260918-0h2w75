@@ -19,7 +19,7 @@
     </el-form>
     <el-row :gutter="16">
       <el-col v-for="p in products" :key="p.id" :span="6" class="col">
-        <ProductCard :product="p" @detail="showDetail" @buy="buy" @chat="chat" />
+        <ProductCard :product="p" :buying="buyingId === p.id" @detail="showDetail" @buy="buy" @chat="chat" />
       </el-col>
     </el-row>
     <el-empty v-if="!loading && products.length === 0" description="暂无商品" />
@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onActivated, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import ProductCard from '../components/common/ProductCard.vue'
 import { PRODUCT_CATEGORIES, categoryLabel, productStatusLabel } from '../constants/product'
@@ -53,6 +53,7 @@ const { products, loading, load } = useProducts()
 const query = reactive<{ category?: string; campus?: string; keyword?: string }>({})
 const detailVisible = ref(false)
 const current = ref<Product | null>(null)
+const buyingId = ref(0)
 const authStore = useAuthStore()
 const router = useRouter()
 
@@ -67,8 +68,17 @@ async function buy(p: Product) {
     router.push('/login')
     return
   }
-  await createTradeOrder(p.id)
-  ElMessage.success('已下单，等待卖家确认')
+  buyingId.value = p.id
+  try {
+    await createTradeOrder(p.id)
+    ElMessage.success('已下单，商品已预订')
+  } catch {
+    // 并发购买、商品已预订/售出等失败原因由 request 拦截器统一提示
+  } finally {
+    buyingId.value = 0
+    // 无论成功失败都重新拉取，保证卡片状态与后端一致（成功即“已预订”）
+    await load(query)
+  }
 }
 
 async function chat(p: Product) {
@@ -82,7 +92,9 @@ async function chat(p: Product) {
   router.push('/messages')
 }
 
-onMounted(() => load())
+// 再次进入商品广场时刷新状态，避免看到已预订商品的旧缓存
+onActivated(() => load(query))
+onMounted(() => load(query))
 </script>
 
 <style scoped>

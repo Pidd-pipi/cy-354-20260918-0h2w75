@@ -33,6 +33,30 @@ func (r *ProductRepository) FindByID(ctx context.Context, id uint) (*model.Produ
 	return &p, nil
 }
 
+// LockByID returns a product row while holding a row-level write lock.
+// It must be called inside a transaction and is used together with order
+// writes to serialize purchase attempts for the same product.
+func (r *ProductRepository) LockByID(ctx context.Context, id uint) (*model.Product, error) {
+	var p model.Product
+	err := db(ctx, r.db).Clauses(clauseLockingForUpdate).First(&p, id).Error
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return &p, nil
+}
+
+// FindByIDs returns the products matching the given ids.
+func (r *ProductRepository) FindByIDs(ctx context.Context, ids []uint) ([]model.Product, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var items []model.Product
+	if err := db(ctx, r.db).Where("id IN ?", ids).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // List filters products by category/campus/keyword/status with pagination.
 func (r *ProductRepository) List(ctx context.Context, category, campus, keyword, status string, page, pageSize int) ([]model.Product, int64, error) {
 	q := db(ctx, r.db).Model(&model.Product{})
@@ -68,6 +92,21 @@ func (r *ProductRepository) UpdateStatus(ctx context.Context, id uint, status st
 	}
 	if res.RowsAffected == 0 {
 		return util.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateStatusFromTo performs an atomic compare-and-set on the product
+// status. It returns util.ErrConflict when the current status is not from.
+func (r *ProductRepository) UpdateStatusFromTo(ctx context.Context, id uint, from, to string) error {
+	res := db(ctx, r.db).Model(&model.Product{}).
+		Where("id = ? AND status = ?", id, from).
+		Update("status", to)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return util.ErrConflict
 	}
 	return nil
 }

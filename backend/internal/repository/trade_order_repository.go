@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/lp/campus-market/internal/constants"
 	"github.com/lp/campus-market/internal/model"
 	"github.com/lp/campus-market/internal/util"
 	"gorm.io/gorm"
@@ -25,25 +26,13 @@ func (r *TradeOrderRepository) Transaction(ctx context.Context, fn func(txCtx co
 
 // Create inserts a new trade order.
 func (r *TradeOrderRepository) Create(ctx context.Context, o *model.TradeOrder) error {
-	return db(ctx, r.db).Create(o).Error
+	return normalizeError(db(ctx, r.db).Create(o).Error)
 }
 
 // FindByID returns a trade order by id.
 func (r *TradeOrderRepository) FindByID(ctx context.Context, id uint) (*model.TradeOrder, error) {
 	var o model.TradeOrder
 	err := db(ctx, r.db).First(&o, id).Error
-	if err != nil {
-		return nil, normalizeError(err)
-	}
-	return &o, nil
-}
-
-// FindByProductAndBuyer returns an active order of a buyer for a product.
-func (r *TradeOrderRepository) FindByProductAndBuyer(ctx context.Context, productID, buyerID uint) (*model.TradeOrder, error) {
-	var o model.TradeOrder
-	err := db(ctx, r.db).
-		Where("product_id = ? AND buyer_id = ? AND status IN ?", productID, buyerID, []string{"pending", "confirmed"}).
-		First(&o).Error
 	if err != nil {
 		return nil, normalizeError(err)
 	}
@@ -77,10 +66,13 @@ func (r *TradeOrderRepository) UpdateStatus(ctx context.Context, id uint, status
 	return nil
 }
 
-// UpdateBuyerConfirmed sets the buyer confirmation timestamp and status.
-func (r *TradeOrderRepository) UpdateBuyerConfirmed(ctx context.Context, id uint, ts interface{}) error {
-	res := db(ctx, r.db).Model(&model.TradeOrder{}).Where("id = ? AND status = ?", id, "pending").
-		Updates(map[string]interface{}{"buyer_confirmed_at": ts, "status": "confirmed"})
+// CancelIfUnfinished atomically cancels an order that is still pending or
+// confirmed. It returns util.ErrConflict when the order is already
+// completed or cancelled, so duplicate and late cancels fail explicitly.
+func (r *TradeOrderRepository) CancelIfUnfinished(ctx context.Context, id uint) error {
+	res := db(ctx, r.db).Model(&model.TradeOrder{}).
+		Where("id = ? AND status IN ?", id, []string{constants.TradeStatusPending, constants.TradeStatusConfirmed}).
+		Update("status", constants.TradeStatusCancelled)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -90,10 +82,26 @@ func (r *TradeOrderRepository) UpdateBuyerConfirmed(ctx context.Context, id uint
 	return nil
 }
 
-// UpdateSellerConfirmed sets the seller confirmation timestamp and completes the order.
+// UpdateBuyerConfirmed sets the buyer confirmation timestamp and moves the
+// order from pending to confirmed with a compare-and-set guard.
+func (r *TradeOrderRepository) UpdateBuyerConfirmed(ctx context.Context, id uint, ts interface{}) error {
+	res := db(ctx, r.db).Model(&model.TradeOrder{}).Where("id = ? AND status = ?", id, constants.TradeStatusPending).
+		Updates(map[string]interface{}{"buyer_confirmed_at": ts, "status": constants.TradeStatusConfirmed})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return util.ErrConflict
+	}
+	return nil
+}
+
+// UpdateSellerConfirmed sets the seller confirmation timestamp and completes
+// the order with a compare-and-set guard, so a duplicate seller confirmation
+// (or one before the buyer has confirmed) cannot rewrite a finished order.
 func (r *TradeOrderRepository) UpdateSellerConfirmed(ctx context.Context, id uint, ts interface{}) error {
-	res := db(ctx, r.db).Model(&model.TradeOrder{}).Where("id = ? AND status = ?", id, "confirmed").
-		Updates(map[string]interface{}{"seller_confirmed_at": ts, "completed_at": ts, "status": "completed"})
+	res := db(ctx, r.db).Model(&model.TradeOrder{}).Where("id = ? AND status = ?", id, constants.TradeStatusConfirmed).
+		Updates(map[string]interface{}{"seller_confirmed_at": ts, "completed_at": ts, "status": constants.TradeStatusCompleted})
 	if res.Error != nil {
 		return res.Error
 	}

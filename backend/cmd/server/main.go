@@ -13,6 +13,7 @@ import (
 
 	"github.com/lp/campus-market/internal/config"
 	"github.com/lp/campus-market/internal/model"
+	"github.com/lp/campus-market/internal/repository"
 	"github.com/lp/campus-market/internal/router"
 	"github.com/lp/campus-market/internal/util"
 	"gorm.io/driver/mysql"
@@ -43,6 +44,14 @@ func main() {
 		&model.TradeOrder{}, &model.Review{}, &model.BookExchange{},
 	); err != nil {
 		logger.Error("auto migrate failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	// Install the single-active-order-per-product storage invariant
+	// (generated column + unique index). Idempotent for databases already
+	// created from database/init.sql.
+	if err := repository.EnsureTradeOrderInvariants(context.Background(), db); err != nil {
+		logger.Error("trade order invariant migration failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 

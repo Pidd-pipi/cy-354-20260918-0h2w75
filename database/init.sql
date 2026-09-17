@@ -62,7 +62,13 @@ CREATE TABLE IF NOT EXISTS trade_orders (
   buyer_confirmed_at DATETIME(3) NULL,
   seller_confirmed_at DATETIME(3) NULL,
   completed_at DATETIME(3) NULL,
+  -- 商品预约闭环的数据库级约束：同一商品至多存在一笔未完成订单。
+  -- 未完成（pending/confirmed）时该生成列等于 product_id，完成/取消后为 NULL，
+  -- 配合唯一索引让并发购买中除第一笔外的写入直接失败，杜绝重复待确认订单。
+  active_product_id BIGINT UNSIGNED GENERATED ALWAYS AS
+    (CASE WHEN `status` IN ('pending','confirmed') THEN `product_id` ELSE NULL END) STORED,
   created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE INDEX uk_trade_orders_active_product (active_product_id),
   INDEX idx_trade_orders_product (product_id),
   INDEX idx_trade_orders_buyer (buyer_id),
   INDEX idx_trade_orders_seller (seller_id),

@@ -176,6 +176,26 @@ cy-354/
 | POST | `/api/v1/book-exchanges/:id/close` | 关闭换书请求 | 本人 |
 | GET | `/api/v1/admin/stats` | 平台统计占位接口 | 管理员 |
 
+## 单件商品预约闭环（交易状态机）
+
+同一商品在同一时刻最多存在一笔未完成（`pending`/`confirmed`）订单，状态闭环如下：
+
+1. **下单即预订**：买家点击购买，后端在单个数据库事务内 `SELECT ... FOR UPDATE` 锁定商品行，
+   校验商品仍为 `on_sale` 后插入 `pending` 订单并把商品原子翻转为 `reserved`（compare-and-set）。
+   并发购买在该锁上串行化：**恰好一笔成功，其余全部返回 409「商品已被预订」，不会留下重复订单**。
+2. **数据库级兜底**：`trade_orders.active_product_id` 是存储生成列（未完成时等于 `product_id`，
+   完成/取消后为 NULL），配合唯一索引 `uk_trade_orders_active_product`，即使绕过服务层也无法写入
+   第二笔未完成订单（MySQL 1062 → 统一 409）。服务启动时幂等安装该约束，并自动修复历史库中的
+   重复脏数据（保留最早一单，其余置为已取消并对齐商品状态）。
+3. **取消回滚**：买卖双方任一方在订单未完成（`pending`）前可取消；订单置为 `cancelled` 与商品
+   回到 `on_sale` 在同一事务内完成。重复取消、完成后取消均返回 409 且商品状态不变；
+   取消后商品可被再次购买并生成新订单。
+4. **两步确认完成**：买家先「确认收货」（`pending → confirmed`，商品保持 `reserved`），
+   卖家再「确认收款」（`confirmed → completed`，商品翻转为 `sold`）。顺序颠倒、角色不符、
+   重复确认均被 compare-and-set 条件更新拒绝（409/403），完成后不可取消、不可再购买。
+5. **刷新一致性**：`GET /trade-orders/me` 为每笔订单批量内嵌最新商品快照（`product` 字段），
+   商品广场与「我的交易」页在下单/取消/确认后及页面重新进入时重新拉取，刷新后订单与商品状态一致。
+
 ## 枚举出现位置清单
 
 ### ProductStatus（on_sale/reserved/sold/removed）
@@ -243,7 +263,11 @@ cy-354/
 ## 质量说明
 
 - 后端 `go build ./...` 与 `go test ./...` 通过（含 service/util 表驱动单测）。
-- 前端 `npm run build` 零错误。
+- `internal/service/trade_order_integration_test.go` 为真实 MySQL 集成测试（数据库不可达时自动 skip，
+  可用 `TEST_DB_DSN` 指定），实测覆盖：12/50 买家并发购买仅一单胜出且无重复订单、
+  数据库唯一索引裸写拦截、买卖双方取消回滚与重复取消、确认收货→确认收款顺序与重复确认、
+  完成后商品售出与列表内嵌快照一致性；`-race -count=N` 下稳定通过。
+- 前端 `npm run build` 零错误；另经 Playwright 浏览器实测发布、并发购买、取消回滚与两步确认全链路 UI。
 - 分层依赖单向：handler → service → repository → model；构造器注入；`%w` 错误链 + 哨兵错误；统一响应 `{code,message,data}`。
 - 日志模板集中于 `internal/constants/log_templates.go`（≥25 条），全栈引用，字段变更需联动修改（屎山设计约束）。
 

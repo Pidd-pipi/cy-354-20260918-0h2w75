@@ -4,7 +4,7 @@
     <el-alert title="毕业季专场：学长学姐闲置好物集中放送" type="warning" :closable="false" class="banner" />
     <el-row :gutter="16">
       <el-col v-for="p in products" :key="p.id" :span="6" class="col">
-        <ProductCard :product="p" @detail="showDetail" @buy="buy" />
+        <ProductCard :product="p" :buying="buyingId === p.id" @detail="showDetail" @buy="buy" />
       </el-col>
     </el-row>
     <el-empty v-if="!loading && products.length === 0" description="专场暂无商品" />
@@ -14,6 +14,7 @@
         <el-descriptions-item label="成色">{{ current.condition }}</el-descriptions-item>
         <el-descriptions-item label="校区">{{ current.campus }}</el-descriptions-item>
         <el-descriptions-item label="价格">¥{{ current.price.toFixed(2) }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ productStatusLabel(current.status) }}</el-descriptions-item>
         <el-descriptions-item label="描述" :span="2">{{ current.description }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
@@ -21,18 +22,19 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onActivated, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import ProductCard from '../components/common/ProductCard.vue'
 import { listGraduation } from '../api/product'
 import { createTradeOrder } from '../api/tradeOrder'
-import { categoryLabel } from '../constants/product'
+import { categoryLabel, productStatusLabel } from '../constants/product'
 import type { Product } from '../types'
 import { useAuthStore } from '../stores/authStore'
 import { useRouter } from 'vue-router'
 
 const products = ref<Product[]>([])
 const loading = ref(false)
+const buyingId = ref(0)
 const detailVisible = ref(false)
 const current = ref<Product | null>(null)
 const authStore = useAuthStore()
@@ -43,17 +45,7 @@ function showDetail(p: Product) {
   detailVisible.value = true
 }
 
-async function buy(p: Product) {
-  if (!authStore.token) {
-    ElMessage.warning('请先登录')
-    router.push('/login')
-    return
-  }
-  await createTradeOrder(p.id)
-  ElMessage.success('已下单')
-}
-
-onMounted(async () => {
+async function loadGraduation() {
   loading.value = true
   try {
     const res = await listGraduation()
@@ -61,7 +53,28 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+async function buy(p: Product) {
+  if (!authStore.token) {
+    ElMessage.warning('请先登录')
+    router.push('/login')
+    return
+  }
+  buyingId.value = p.id
+  try {
+    await createTradeOrder(p.id)
+    ElMessage.success('已下单，商品已预订')
+  } catch {
+    // 失败原因由 request 拦截器统一提示（如商品已被预订）
+  } finally {
+    buyingId.value = 0
+    await loadGraduation()
+  }
+}
+
+onMounted(loadGraduation)
+onActivated(loadGraduation)
 </script>
 
 <style scoped>

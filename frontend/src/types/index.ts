@@ -55,6 +55,7 @@ export interface TradeOrder {
   seller_confirmed_at: string | null
   completed_at: string | null
   created_at: string
+  product?: Product | null
 }
 
 export interface Review {
